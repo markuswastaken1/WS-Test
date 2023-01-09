@@ -1,0 +1,92 @@
+# syntax=docker/dockerfile:1
+
+# Dockerfile for development
+# Below RUN statements are broken up to take advantage of Docker layer cache.
+
+# (OPTION) Use base Ubuntu 22.04 if a Nvidia GPU is unavailable.
+# FROM ubuntu:22.04
+FROM nvidia/cuda:11.7.1-cudnn8-runtime-ubuntu22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV LANG="C.UTF-8" LC_ALL="C.UTF-8"
+RUN echo 'Etc/UTC' > /etc/timezone \
+  && ln -s /usr/share/zoneinfo/Etc/UTC /etc/localtime
+
+RUN apt-get update \
+  # Needed to curl and authorize ROS repository key.
+  && apt-get install -y curl gnupg lsb-release software-properties-common \
+  && apt-get install -y sudo git \
+  # Enable universe repositories.
+  && add-apt-repository universe
+
+# Create user and add to sudoers.
+ARG USERNAME=user
+ARG USER_UID=1000
+ARG USER_GID=$USER_UID
+ARG USER_SH=/bin/bash
+RUN groupadd -g $USER_GID $USERNAME \
+  && useradd -u $USER_UID -g $USER_GID -s $USER_SH -m $USERNAME \
+  && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
+  && chmod 0440 /etc/sudoers.d/$USERNAME
+
+# Add VNC server & noVNC web app for debugging and control.
+COPY ./.devcontainer/scripts/desktop-lite-debian.sh /tmp/scripts/desktop-lite-debian.sh
+ENV DBUS_SESSION_BUS_ADDRESS="autolaunch:" \
+  VNC_RESOLUTION="1440x768x16" \
+  VNC_DPI="96" \
+  VNC_PORT="5901" \
+  NOVNC_PORT="6080" \
+  DISPLAY=":1"
+RUN bash /tmp/scripts/desktop-lite-debian.sh $USERNAME password
+
+# Enable openCL support (OpenCV uses it for hardware acceleration).
+RUN mkdir -p /etc/OpenCL/vendors && \
+  echo "libnvidia-opencl.so.1" > /etc/OpenCL/vendors/nvidia.icd
+
+# Curl key and authorize ROS repository.
+RUN curl -sSL https://raw.githubusercontent.com/ros/rosdistro/master/ros.key -o /usr/share/keyrings/ros-archive-keyring.gpg
+RUN echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/ros-archive-keyring.gpg] http://packages.ros.org/ros2/ubuntu $(. /etc/os-release && echo $UBUNTU_CODENAME) main" > /etc/apt/sources.list.d/ros2.list
+
+# ROS Humble's support window is till 2027 (correct as of 23 Nov 2022).
+ARG ROS_DISTRO=humble 
+ENV ROS_DISTRO=$ROS_DISTRO
+
+RUN apt-get update
+RUN apt-get install -y \
+  ros-${ROS_DISTRO}-ros-base \
+  python3-rosdep \
+  python3-colcon-common-extensions \
+  python3-pip
+
+# Set default version of Python to be the one ROS Humble uses.
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.10 10
+
+# Initialize rosdep package manager.
+RUN rosdep init && rosdep update
+
+# RQT comes with useful debugging and control tools.
+# RQT's plugin support allows for custom visualizations, tools or control panels.
+RUN apt-get install -y ~nros-${ROS_DISTRO}-rqt*
+
+# Needed for Dev Container lifecycle hooks to run.
+COPY ./.devcontainer /tmp/.devcontainer
+
+COPY ./entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT [ \
+  # VNC entrypoint
+  "/usr/local/share/desktop-init.sh", \
+  # ROS entrypoint
+  "/entrypoint.sh" \
+  ]
+
+USER $USERNAME
+
+# Make /bin/sh launch bash instead.
+ENV ENV=\$HOME/.shrc
+RUN echo "exec bash" >> ~/.shrc
+# Auto-activate ROS whenever bash shell is opened.
+RUN echo "source /opt/ros/$ROS_DISTRO/setup.bash\nsource /code/install/local_setup.bash" >> ~/.bashrc
+
+# Ensure RQT icons show up.
+RUN mkdir ~/.icons && ln -s /usr/share/icons/Tango ~/.icons/hicolor

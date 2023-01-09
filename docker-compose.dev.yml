@@ -1,0 +1,65 @@
+version: '3.9'
+
+# (OPTION) Create named volume to store repository.
+# volumes:
+#   code:
+
+services:
+  dev:
+    # NOTE: All paths are relative to the first file in the `dockerComposeFile`
+    # array found in `devcontainer.json`.
+
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+
+    volumes:
+      # (OPTION) Choose whether to use named volume to store repository.
+      - .:/code:cached # Repository located on host is mounted into container.
+      # - code:/code # named volume used to store repository.
+      # (OPTION) Mount point for `data` folder.
+      # - ./data:/data:cached
+      # (OPTION)(LINUX)(X11) Mount host's `.Xauthority` to allow container to self-authenticate with X Server.
+      # - $HOME/.Xauthority:/home/user/.Xauthority:rw
+
+    # (OPTION)(LINUX)(X11) Use X Server address from host.
+    # environment:
+    #   DISPLAY: ${DISPLAY}
+
+    # Better process handling by using a process management system (tini).
+    init: true
+    # Larger shared memory for VNC & ROS2.
+    shm_size: 1gb
+
+    # Uncomment the next four lines if you will use a ptrace-based debugger like C++, Go, and Rust.
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+
+    # Used to allow ROS2's underlying DDS to communicate across containers.
+    ipc: service:donor
+    pid: service:donor
+
+    # Isolate ROS2 nodes into their own network.
+    network_mode: service:donor
+
+    # Override default command so things don't shut down after the process ends.
+    command: /bin/sh -c "while sleep 1000; do :; done"
+
+    # Request for GPU access.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+
+  # Extension of donor service defined in `docker-compose.yml`.
+  donor:
+    # (OPTION)(LINUX)(X11) Needed to use host's X Server for GUI apps.
+    # network_mode: host
+    ports:
+      # Expose noVNC web app.
+      - 6080:6080
+      # Expose rosbridge.
+      - 9090:9090
