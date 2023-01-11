@@ -13,14 +13,14 @@ git config --global safe.directory "*"
 # If using named volume to store repository, clone and setup the repository.
 test -d "/code/.git" \
   || ( \
-    git clone "(OPTION) Insert repository url" /code --recurse-submodules \
+    git clone "https://github.com/markuswastaken1/WS-Test.git" /code --recurse-submodules \
     && cd /code \
     && git submodule foreach --recursive git checkout main \
   )
 
 # (OPTION) Symlink `/data` to `/code/data` for convenience if using `/data` mount point.
-# sudo chown user:user /data
-# sudo ln -sf /data /code/
+sudo chown user:user /data
+sudo ln -sf /data /code/
 
 # Ensure dependencies are installed.
 sudo rosdep install -i --from-path /code -y
